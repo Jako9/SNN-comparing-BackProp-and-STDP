@@ -176,6 +176,9 @@ def print_params(net):
     for name, param in net.named_parameters():
         if param.requires_grad:
             print(name)
-            length += param.size(0)
+            layer_size = 1
+            for dim in param.size():
+                layer_size *= dim
+            length += layer_size
     print("In summary {} parameters".format(length))
     print()

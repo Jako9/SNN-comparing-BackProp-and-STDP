@@ -42,7 +42,10 @@ class Net(nn.Module):
         reset_log(self.lif0.threshold,self.lif1.threshold,self.lif2.threshold)
 
         #Record the final layer
+        spk0_rec = []
+        spk1_rec = []
         spk2_rec = []
+        spk_out = []
         mem2_rec = []
 
         for step in range(x.size(0)):
@@ -54,7 +57,12 @@ class Net(nn.Module):
 
             #Track Spike-Activity and Membrane Potential
             write_log(mem0[0],spk0[0],mem1[0],spk1[0],mem2[0],spk2[0])
+            spk0_rec.append(spk0)
+            spk1_rec.append(spk1)
             spk2_rec.append(spk2)
             mem2_rec.append(mem2)
 
-        return torch.stack(spk2_rec, dim=0), torch.stack(mem2_rec, dim=0)
+        spk_out.append(torch.stack(spk0_rec,dim=0))
+        spk_out.append(torch.stack(spk1_rec,dim=0))
+        spk_out.append(torch.stack(spk2_rec,dim=0))
+        return spk_out, torch.stack(mem2_rec, dim=0)

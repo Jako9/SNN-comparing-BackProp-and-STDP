@@ -46,7 +46,7 @@ def main():
             train_backprop(net,args,device,train_loader,test_loader,optimizer,loss,epoch)
         current , _ = calc_acc(net,args,device,test_loader,output=True)
         track_best(current)
-        plotProgress(args,current,learn_threshold)
+        plotProgress(args,current,LEARN_THRESHOLD)
 
     if args.save_model:
         torch.save(net.state_dict(), "fashion_mnist_snn.pt")

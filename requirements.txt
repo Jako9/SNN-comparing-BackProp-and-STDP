@@ -3,3 +3,4 @@ torchvision
 snntorch
 matplotlib
 IPython
+numba
