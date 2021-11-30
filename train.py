@@ -3,14 +3,18 @@ from snntorch import spikegen
 
 #PyTorch
 import torch
-
+import time
+import math
 from config import *
 from log import *
 import numba
 from numba import njit
 from numba.typed import List
 
+translation_table = torch.tensor([[0,1,2,3,4,5,6,7,8,9],[20,20,20,20,20,20,20,20,20,20]]).to("cuda:0")
+
 def calc_acc(net,args,device,test_loader,output = False):
+
     total = 0
     correct_spike = 0
     correct_mem = 0
@@ -26,15 +30,40 @@ def calc_acc(net,args,device,test_loader,output = False):
         #calculate total accuracy
         _, predicted_spike = test_spk.sum(dim=0).max(1)
         _, predicted_mem = test_mem.sum(dim=0).max(1)
+
+        if args.use_stdp:
+            global translation_table
+            for i in range(targets.size(0)):
+                if translation_table[0][predicted_spike[i]] != targets[i] and translation_table[1][predicted_spike[i]] < 500:
+                    translation_table[1][predicted_spike[i]] -= 1
+                elif translation_table[1][predicted_spike[i]] < 500:
+                    translation_table[1][predicted_spike[i]] += 1
+
+                if translation_table[1][predicted_spike[i]] <= 0:
+                    target_index = (translation_table[0] == targets[i]).nonzero().item()
+                    if translation_table[1][target_index] >= 500:
+                        continue
+                    elif translation_table[1][target_index] > 50:
+                        translation_table[1][target_index].div(2)
+                    else:
+                        translation_table[0][target_index] = translation_table[0][predicted_spike[i]]
+                        translation_table[0][predicted_spike[i]] = targets[i]
+                        translation_table[1][target_index] = 100
+                        translation_table[1][predicted_spike[i]] = 100
+
+            predicted_spike = translation_table[0][predicted_spike]
+            predicted_mem = translation_table[0][predicted_mem]
+
         total += targets.size(0)
         correct_spike += (predicted_spike == targets).sum().item()
         correct_mem += (predicted_mem == targets).sum().item()
 
     if(output):
         track_correct_labels(targets)
-        print_epoch(correct_spike,total)
+        print_epoch(correct_spike,total,translation_table)
 
     return (correct_spike / total * 100),(correct_mem / total * 100)
+
 
 def train_backprop(net, args, device, train_loader, test_loader, optimizer, loss, epoch):
     train_batch = iter(train_loader)
@@ -81,7 +110,7 @@ def train_backprop(net, args, device, train_loader, test_loader, optimizer, loss
             #Print train/test loss/accuracy
             if batch_idx  % args.log_interval == 0:
                 accuracy_spike, accuracy_mem = calc_acc(net,args,device,test_loader)
-                train_printer(epoch,batch_idx,train_loss_hist(len(train_loader)*epoch + batch_idx),test_loss_hist(len(train_loader)*epoch + batch_idx),accuracy_spike,accuracy_mem)
+                train_printer(epoch,batch_idx,accuracy_spike,accuracy_mem,train_loss = train_loss_hist(len(train_loader)*epoch + batch_idx), test_loss = test_loss_hist(len(train_loader)*epoch + batch_idx))
                 track_accuracy(accuracy_spike,accuracy_mem)
                 if args.dry_run:
                     break
@@ -100,40 +129,70 @@ def train_stdp(net, args, device, train_loader, test_loader, optimizer, loss, ep
             indices = layer.nonzero()
             spike_indices.append(indices)
 
-        for layer_index in range(1,len(spk_rec)-1):
-            calc_spikes(spk_rec[layer_index].to("cpu").detach().numpy(),spk_rec[layer_index-1].to("cpu").detach().numpy(),args.num_steps,args.batch_size,5)
+        layers_weights = []
+        for layer in net.children():
+            if isinstance(layer, torch.nn.Linear):
+                layers_weights.append(layer.weight.to("cpu").detach().numpy())
+
+        for layer_index in range(1,len(spk_rec)):
+            adjustments = calc_spikes(layers_weights[layer_index-1],layers_weights,spk_rec[layer_index].to("cpu").detach().numpy(),spk_rec[layer_index-1].to("cpu").detach().numpy(),args.num_steps,args.batch_size,STDP_RANGE)
+            with torch.no_grad():
+                linear_layer_index = 0
+                for layer in net.children():
+                    if isinstance(layer, torch.nn.Linear):
+                        if (linear_layer_index + 1 == layer_index):
+                            weights = layer.weight.to("cpu").detach().numpy()
+                            updated_weights = torch.nn.parameter.Parameter(torch.tensor(np.add(weights,adjustments,dtype=np.float32)).to(device))
+                            layer.weight = updated_weights
+                            break
+                        linear_layer_index += 1
+
+
 
         if batch_idx  % args.log_interval == 0:
-            print("Batch Done! ({})".format(batch_idx))
+            accuracy_spike, accuracy_mem = calc_acc(net,args,device,test_loader)
+            train_printer(epoch,batch_idx,accuracy_spike,accuracy_mem)
+            track_accuracy(accuracy_spike,accuracy_mem)
             if args.dry_run:
                 break
-
     print("Epoch Done!")
 
 @njit()
-def calc_spikes(layer,prev_layer,num_steps,batch_size,stdp_range):
-    for time_step in range(num_steps-1):
-        for batch_index in range(batch_size-1):
+def calc_spikes(weights,layers_weights,layer,prev_layer,num_steps,batch_size,stdp_range):
+    adjustments = np.zeros(weights.shape)
+    for time_step in range(num_steps):
+        for batch_index in range(batch_size):
             if 1 in layer[time_step][batch_index]:
-                spiked_neurons = layer[time_step][batch_index].nonzero()[0]
                 presynaptic_spikes = calc_presynaptic_spikes(prev_layer,time_step,batch_index,stdp_range-1)
                 postsynaptic_spikes = calc_postsynaptic_spikes(prev_layer,time_step+1,batch_index,stdp_range-1)
-    #TODO
+                for post_neuron_index in range(layer[time_step][batch_index].size):
+                    if(layer[time_step][batch_index][post_neuron_index] == 1):
+                        for pre_neuron_index in range(prev_layer[time_step][batch_index].size):
+                            adjustments[post_neuron_index][pre_neuron_index] += (calc_weight_adjustment(weights,post_neuron_index,pre_neuron_index,presynaptic_spikes[pre_neuron_index],postsynaptic_spikes[pre_neuron_index])/ batch_size * num_steps)
+
+    return adjustments
+
+@njit()
+def calc_weight_adjustment(weights,post_neuron,pre_neuron,pre_count,post_count):
+    adjustedment = STDP_LR * (math.exp((pre_count - post_count) / STDP_RANGE) - STDP_OFFSET) * (MAX_WEIGHT - weights[post_neuron][pre_neuron]) * (weights[post_neuron][pre_neuron] - MIN_WEIGHT)
+    #print("Pre, Post: {}, {}".format(pre_count,post_count))
+    #print("Exp: {}".format((math.exp((pre_count - post_count) / STDP_RANGE) - STDP_OFFSET)))
+    #print("Weight: {}".format(weights[post_neuron][pre_neuron]))
+    #print("Adjustment: {}".format(adjustedments))
+    return adjustedment
 
 @njit()
 def calc_presynaptic_spikes(layer,time_step,batch_index,stdp_range):
-    #Das ist ein Witz, dass das funktioniert (Sonst mecker njit wegen Typ)
     if time_step < 0:
-        return [np.reshape(np.array(x),0) for x in range(0)]
+        return np.zeros(layer[0][0].size).astype(np.float32)
     if stdp_range <= 0:
-        return [layer[time_step][batch_index].nonzero()[0]]
-
-    return [layer[time_step][batch_index].nonzero()[0]] + (calc_presynaptic_spikes(layer,time_step-1,batch_index,stdp_range-1))
+        return layer[time_step][batch_index]
+    return np.add(layer[time_step][batch_index],calc_presynaptic_spikes(layer,time_step-1,batch_index,stdp_range-1))
 
 @njit()
 def calc_postsynaptic_spikes(layer,time_step,batch_index,stdp_range):
     if time_step >= layer.shape[0]:
-        return [np.reshape(np.array(x),0) for x in range(0)]
+        return np.zeros(layer[0][0].size).astype(np.float32)
     if stdp_range <= 0:
-        return [layer[time_step][batch_index].nonzero()[0]]
-    return [layer[time_step][batch_index].nonzero()[0]] + (calc_postsynaptic_spikes(layer,time_step+1,batch_index,stdp_range-1))
+        return layer[time_step][batch_index]
+    return np.add(layer[time_step][batch_index],calc_postsynaptic_spikes(layer,time_step+1,batch_index,stdp_range-1))

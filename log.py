@@ -28,22 +28,22 @@ bestAcc = 0
 fig, ax = plt.subplots(3,3,figsize=(20,8))
 
 
-def reset_log(threshold0,threshold1,threshold2):
+def reset_log(threshold1,threshold2):
     spk0_hist.clear()
     spk1_hist.clear()
     spk2_hist.clear()
     mem0_hist.clear()
     mem1_hist.clear()
     mem2_hist.clear()
-    global thrs0_hist
+    #global thrs0_hist
     global thrs1_hist
     global thrs2_hist
-    thrs0_hist = threshold0
+    #thrs0_hist = threshold0
     thrs1_hist = threshold1
     thrs2_hist = threshold2
 
-def write_log(mem0,spk0,mem1,spk1,mem2,spk2):
-    mem0_hist.append(mem0)
+def write_log(spk0,mem1,spk1,mem2,spk2):
+    #mem0_hist.append(mem0)
     spk0_hist.append(spk0)
     mem1_hist.append(mem1)
     spk1_hist.append(spk1)
@@ -119,8 +119,8 @@ def plotProgress(args,currentAccuracy,learn_threshold):
     ax[2][0].set_xlabel("Neuron")
 
     ax[0][1].clear()
-    ax[0][1].bar(range(mem_hist0.size(0)),mem_hist0.to("cpu"))
-    ax[0][1].plot(thrs0_hist.to("cpu").detach().numpy(), color = "red", linewidth = 1, linestyle= "dashed")
+    #ax[0][1].bar(range(mem_hist0.size(0)),mem_hist0.to("cpu"))
+    #ax[0][1].plot(thrs0_hist.to("cpu").detach().numpy(), color = "red", linewidth = 1, linestyle= "dashed")
     ax[0][1].set_title("Average Neuron-Potential for Sample {}".format(correct_labels[0]))
 
     ax[1][1].clear()
@@ -140,11 +140,12 @@ def plotProgress(args,currentAccuracy,learn_threshold):
     ax[0][2].set_ylabel("Accuracy in %")
     ax[0][2].set_ylim([0,100])
 
-    ax[1][2].clear()
-    ax[1][2].plot(train_loss_hist_, label = "Train Loss")
-    ax[1][2].plot(test_loss_hist_, label = "Test Loss")
-    ax[1][2].legend(loc='center left', bbox_to_anchor=(1, 0.5), fancybox=True, shadow=True)
-    ax[1][2].set_ylabel("Loss")
+    if not args.use_stdp:
+        ax[1][2].clear()
+        ax[1][2].plot(train_loss_hist_, label = "Train Loss")
+        ax[1][2].plot(test_loss_hist_, label = "Test Loss")
+        ax[1][2].legend(loc='center left', bbox_to_anchor=(1, 0.5), fancybox=True, shadow=True)
+        ax[1][2].set_ylabel("Loss")
 
     ax[2][2].clear()
     for i in range(len(mempot_interp)):
@@ -157,17 +158,26 @@ def plotProgress(args,currentAccuracy,learn_threshold):
     plt.show(block=False)
     plt.pause(1)
 
-def train_printer(epoch,iter_counter,loss,test_loss,accuracy_spike,accuracy_mem):
+def train_printer(epoch,iter_counter,accuracy_spike,accuracy_mem,train_loss = None, test_loss = None):
     print(f"Epoch {epoch}, Iteration {iter_counter}")
-    print(f"Train Set Loss: {loss:.2f}")
-    print(f"Test Set Loss: {test_loss:.2f}")
+    if train_loss is not None:
+        print(f"Train Set Loss: {train_loss:.2f}")
+    if test_loss is not None:
+        print(f"Test Set Loss: {test_loss:.2f}")
     print(f"Test Set Accuracy with Spikes: {accuracy_spike:.2f}%")
     print(f"Test Set Accuracy with Membrane Potential: {accuracy_mem:.2f}%")
     print("\n")
 
-def print_epoch(correct_spike,total):
+def print_epoch(correct_spike,total,translation_table):
+    avg_certainty = translation_table[1].sum().item() / translation_table[1].size(0)
     print(f"Total correctly classified test set images: {correct_spike}/{total}")
     print(f"Test Set Accuracy: {100 * correct_spike / total:.2f}%")
+    print("Classes:")
+    print("0|1|2|3|4|5|6|7|8|9")
+    print("↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓")
+    t = translation_table[0]
+    print("{}|{}|{}|{}|{}|{}|{}|{}|{}|{}".format(t[0],t[1],t[2],t[3],t[4],t[5],t[6],t[7],t[8],t[9]))
+    print("Average certainty: {}".format(avg_certainty))
     print("\n")
 
 def print_params(net):
