@@ -21,6 +21,7 @@ train_loss_hist_ = []
 test_loss_hist_ = []
 accuracies_spike = []
 accuracies_mem = []
+class_guesses = [[0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0]]
 correct_labels = torch.zeros(1)
 bestAcc = 0
 
@@ -178,6 +179,9 @@ def print_epoch(correct_spike,total,translation_table):
     t = translation_table[0]
     print("{}|{}|{}|{}|{}|{}|{}|{}|{}|{}".format(t[0],t[1],t[2],t[3],t[4],t[5],t[6],t[7],t[8],t[9]))
     print("Average certainty: {}".format(avg_certainty))
+    global class_guesses
+    for i, correct in enumerate(class_guesses):
+        print("{}: {}".format(i,correct))
     print("\n")
 
 def print_params(net):
@@ -192,3 +196,11 @@ def print_params(net):
             length += layer_size
     print("In summary {} parameters".format(length))
     print()
+
+def track_class_guesses(correct,guess):
+    global class_guesses
+    class_guesses[correct][guess] += 1
+
+def reset_class_guesses():
+    global class_guesses
+    class_guesses = [[0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0]]

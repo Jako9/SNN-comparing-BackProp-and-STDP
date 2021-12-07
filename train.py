@@ -15,6 +15,7 @@ translation_table = torch.tensor([[0,1,2,3,4,5,6,7,8,9],[20,20,20,20,20,20,20,20
 
 def calc_acc(net,args,device,test_loader,output = False):
 
+    reset_class_guesses()
     total = 0
     correct_spike = 0
     correct_mem = 0
@@ -51,8 +52,10 @@ def calc_acc(net,args,device,test_loader,output = False):
                         translation_table[1][target_index] = 100
                         translation_table[1][predicted_spike[i]] = 100
 
-            predicted_spike = translation_table[0][predicted_spike]
-            predicted_mem = translation_table[0][predicted_mem]
+
+                track_class_guesses(targets[i],predicted_spike[i])
+                predicted_spike[i] = translation_table[0][predicted_spike[i]]
+                predicted_mem[i] = translation_table[0][predicted_mem[i]]
 
         total += targets.size(0)
         correct_spike += (predicted_spike == targets).sum().item()

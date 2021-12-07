@@ -18,10 +18,10 @@ dtype = torch.float
 
 #STDP
 STDP_RANGE = 5
-STDP_LR = 0.1#5e-4
+STDP_LR = 5e-4
 STDP_OFFSET = 1
-MIN_WEIGHT = -0.1
-MAX_WEIGHT = 0.1
+MIN_WEIGHT = -1
+MAX_WEIGHT = 1
 
 #Corresponding Items to nn Classes
 classes = ["T-Shirt","Trouser","Pullover","Dress","Coat","Sandal","Shirt","Sneaker","Bag","Ankle Boot"]
