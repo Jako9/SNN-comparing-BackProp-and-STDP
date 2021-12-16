@@ -22,15 +22,15 @@ def main():
                 transforms.Normalize((0,), (1,))
                 ])
 
-    mnist_train = datasets.FashionMNIST(DATA_PATH, train=True, download=True, transform=transform)
-    mnist_test = datasets.FashionMNIST(DATA_PATH, train=False, download=True, transform=transform)
+    mnist_train = datasets.MNIST(DATA_PATH, train=True, download=True, transform=transform)
+    mnist_test = datasets.MNIST(DATA_PATH, train=False, download=True, transform=transform)
 
     #Create DataLoaders
     train_loader = DataLoader(mnist_train, batch_size=args.batch_size, shuffle=True, drop_last=True)
     test_loader = DataLoader(mnist_test, batch_size=args.batch_size, shuffle=True, drop_last=True)
 
     #Load the network onto CUDA if available
-    net = snn_net.Net(args.beta,device).to(device)
+    net = snn_net.Net(args,device).to(device)
     torch.manual_seed(args.seed)
 
     print_params(net)
@@ -41,7 +41,10 @@ def main():
     #Outer training loop
     for epoch in range(args.epochs):
         if(args.use_stdp):
-            train_stdp(net,args,device,train_loader,test_loader,optimizer,loss,epoch)
+            if(epoch < 25):
+                train_stdp(net,args,device,train_loader,test_loader,optimizer,loss,epoch,layer = 0)
+            else:
+                train_stdp(net,args,device,train_loader,test_loader,optimizer,loss,epoch,layer = 1)
         else:
             train_backprop(net,args,device,train_loader,test_loader,optimizer,loss,epoch)
         current , _ = calc_acc(net,args,device,test_loader,output=True)

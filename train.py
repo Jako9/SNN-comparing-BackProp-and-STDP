@@ -26,7 +26,7 @@ def calc_acc(net,args,device,test_loader,output = False):
         targets = targets.to(device)
 
         #forward pass
-        test_spk, test_mem = net(spiking_data[:,:,0,:,:].view(args.num_steps,args.batch_size,NUM_INPUTS))
+        test_spk, test_mem, _, _ = net(spiking_data[:,:,0,:,:].view(args.num_steps,args.batch_size,NUM_INPUTS),args)
         test_spk = test_spk[len(test_spk)-1]
         #calculate total accuracy
         _, predicted_spike = test_spk.sum(dim=0).max(1)
@@ -62,6 +62,10 @@ def calc_acc(net,args,device,test_loader,output = False):
         correct_mem += (predicted_mem == targets).sum().item()
 
     if(output):
+        print("AVG Layer 1")
+        print(net.fc1.weight.mean())
+        print("AVG Layer 2")
+        print(net.fc2.weight.mean())
         track_correct_labels(targets)
         print_epoch(correct_spike,total,translation_table)
 
@@ -78,7 +82,7 @@ def train_backprop(net, args, device, train_loader, test_loader, optimizer, loss
 
         #forward pass
         net.train()
-        spk_rec, mem_rec = net(spiking_data.view(args.num_steps,args.batch_size, -1))
+        spk_rec, mem_rec, _, _= net(spiking_data.view(args.num_steps,args.batch_size, -1),args)
         spk_rec = spk_rec[len(spk_rec)-1]
 
         #initialize the loss & sum over time
@@ -102,7 +106,7 @@ def train_backprop(net, args, device, train_loader, test_loader, optimizer, loss
             test_targets = test_targets.to(device)
 
             #Test set forward pass
-            test_spk, test_mem = net(spiking_test_data.view(args.num_steps,args.batch_size, -1))
+            test_spk, test_mem, _, _ = net(spiking_test_data.view(args.num_steps,args.batch_size, -1),args)
             test_spk = test_spk[len(test_spk)-1]
 
             #Test set loss
@@ -118,47 +122,49 @@ def train_backprop(net, args, device, train_loader, test_loader, optimizer, loss
                 if args.dry_run:
                     break
 
-def train_stdp(net, args, device, train_loader, test_loader, optimizer, loss, epoch):
+def train_stdp(net, args, device, train_loader, test_loader, optimizer, loss, epoch, out = True, layer = 0):
     train_batch = iter(train_loader)
 
     #Minibatch training loop
+    accuracy_spike, accuracy_mem = 0,0
     for batch_idx, (data, targets) in enumerate(train_batch):
         spiking_data = spikegen.rate(data.to(device), num_steps=args.num_steps)
 
         #Pass Batch through SNN
-        spk_rec, mem_rec = net(spiking_data.view(args.num_steps,args.batch_size, -1))
-        spike_indices = []
-        for layer in spk_rec:
-            indices = layer.nonzero()
-            spike_indices.append(indices)
+        spk_rec, mem_rec, pre_rec, post_rec = net(spiking_data.view(args.num_steps,args.batch_size, -1),args,stdp = True, layer = layer)
+        #spike_indices = []
+        #for layer in spk_rec:
+        #    indices = layer.nonzero()
+        #    spike_indices.append(indices)
 
-        layers_weights = []
-        for layer in net.children():
-            if isinstance(layer, torch.nn.Linear):
-                layers_weights.append(layer.weight.to("cpu").detach().numpy())
+        #layers_weights = []
+        #for layer in net.children():
+        #    if isinstance(layer, torch.nn.Linear):
+        #        layers_weights.append(layer.weight.to("cpu").detach().numpy())
+        #
+        #for layer_index in range(1,len(spk_rec)):
+        #    adjustments = calc_spikes(layers_weights[layer_index-1],layers_weights,spk_rec[layer_index].to("cpu").detach().numpy(),spk_rec[layer_index-1].to("cpu").detach().numpy(),args.num_steps,args.batch_size,STDP_RANGE)
+        #    with torch.no_grad():
+        #        linear_layer_index = 0
+        #        for layer in net.children():
+        #            if isinstance(layer, torch.nn.Linear):
+        #                if (linear_layer_index + 1 == layer_index):
+        #                    weights = layer.weight.to("cpu").detach().numpy()
+        #                    updated_weights = torch.nn.parameter.Parameter(torch.tensor(np.add(weights,adjustments,dtype=np.float32)).to(device))
+        #                    layer.weight = updated_weights
+        #                    break
+        #                linear_layer_index += 1
 
-        for layer_index in range(1,len(spk_rec)):
-            adjustments = calc_spikes(layers_weights[layer_index-1],layers_weights,spk_rec[layer_index].to("cpu").detach().numpy(),spk_rec[layer_index-1].to("cpu").detach().numpy(),args.num_steps,args.batch_size,STDP_RANGE)
-            with torch.no_grad():
-                linear_layer_index = 0
-                for layer in net.children():
-                    if isinstance(layer, torch.nn.Linear):
-                        if (linear_layer_index + 1 == layer_index):
-                            weights = layer.weight.to("cpu").detach().numpy()
-                            updated_weights = torch.nn.parameter.Parameter(torch.tensor(np.add(weights,adjustments,dtype=np.float32)).to(device))
-                            layer.weight = updated_weights
-                            break
-                        linear_layer_index += 1
-
-
+        if out:
+            printProgressBar(batch_idx, len(train_batch), "Spk: {:.2f}%, Mem: {:.2f}%".format(accuracy_spike,accuracy_mem), "Complete", length=50)
 
         if batch_idx  % args.log_interval == 0:
-            accuracy_spike, accuracy_mem = calc_acc(net,args,device,test_loader)
-            train_printer(epoch,batch_idx,accuracy_spike,accuracy_mem)
-            track_accuracy(accuracy_spike,accuracy_mem)
+            #accuracy_spike, accuracy_mem = calc_acc(net,args,device,test_loader)
+            track_accuracy(0,0)
             if args.dry_run:
                 break
-    print("Epoch Done!")
+    print()
+    print("Epoch {} Done!".format(epoch))
 
 @njit()
 def calc_spikes(weights,layers_weights,layer,prev_layer,num_steps,batch_size,stdp_range):
@@ -199,3 +205,13 @@ def calc_postsynaptic_spikes(layer,time_step,batch_index,stdp_range):
     if stdp_range <= 0:
         return layer[time_step][batch_index]
     return np.add(layer[time_step][batch_index],calc_postsynaptic_spikes(layer,time_step+1,batch_index,stdp_range-1))
+
+def calc_pre_weight_change(args, spk, pre, weights):
+    adjustments = (torch.bmm(pre.unsqueeze(2), spk.unsqueeze(1)).sum(dim=0)) / args.batch_size
+    adjusted_weights = (weights + (weights * adjustments)).clamp(MIN_WEIGHT,MAX_WEIGHT)
+    return adjusted_weights
+
+def calc_post_weight_change(args, spk, post, weights):
+    adjustments = (torch.bmm(spk.unsqueeze(2), post.unsqueeze(1)).sum(dim=0)) / args.batch_size
+    adjusted_weights = (weights + (weights * adjustments)).clamp(MIN_WEIGHT,MAX_WEIGHT)
+    return adjusted_weights

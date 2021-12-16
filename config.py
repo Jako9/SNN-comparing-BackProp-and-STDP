@@ -3,25 +3,30 @@ import torch
 
 # Network Architecture
 NUM_INPUTS = 28*28
-NUM_HIDDEN = 1000
+NUM_HIDDEN = 256
 NUM_OUTPUTS = 10
 
 BATCH_SIZE = 128
-EPOCHS = 10
+EPOCHS = 100
 BETA = 0.95
 LR = 5e-4
 LEARN_BETA = False
 LEARN_THRESHOLD = False
 # Temporal Dynamics
-NUM_STEPS = 40
+NUM_STEPS = 100
 dtype = torch.float
 
 #STDP
-STDP_RANGE = 5
+STDP_RANGE = 20
 STDP_LR = 5e-4
 STDP_OFFSET = 1
-MIN_WEIGHT = -1
-MAX_WEIGHT = 1
+MIN_WEIGHT = 0
+MAX_WEIGHT = 0.15
+
+A_PLUS = 0.008
+A_MINUS = A_PLUS * 1.01
+STDP_DECAY = 10
+DT = 1
 
 #Corresponding Items to nn Classes
 classes = ["T-Shirt","Trouser","Pullover","Dress","Coat","Sandal","Shirt","Sneaker","Bag","Ankle Boot"]
