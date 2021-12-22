@@ -79,7 +79,13 @@ def track_best(current):
 def best():
     return bestAcc
 
-def plotProgress(args,currentAccuracy,learn_threshold):
+def setup_plot():
+    fig.suptitle("Calculating...")
+    plt.ion()
+    plt.show()
+    plt.pause(1)
+
+def plotProgress(args,currentAccuracy,learn_threshold,epoch):
     spike_hist0 = sum(spk0_hist)
     spike_hist1 = sum(spk1_hist)
     spike_hist2 = sum(spk2_hist)
@@ -105,6 +111,7 @@ def plotProgress(args,currentAccuracy,learn_threshold):
     smoothen_mem = interp1d(x_scaled, accuracies_mem,kind="cubic")
     yi_mem = smoothen_mem(x_scaledi)
 
+    fig.suptitle("Epoch: " + str(epoch))
     ax[0][0].clear()
     ax[0][0].bar(range(spike_hist0.size(0)),spike_hist0.to("cpu"))
     ax[0][0].set_title("Spike Activity for Sample {}".format(correct_labels[0]))
@@ -156,7 +163,11 @@ def plotProgress(args,currentAccuracy,learn_threshold):
     ax[2][2].legend(loc='center left', bbox_to_anchor=(1, 0.5), fancybox=True, shadow=True)
     ax[2][2].set_ylabel("Membrane Potential Output")
     ax[2][2].set_xlabel("Time Step")
-    plt.show(block=False)
+
+    if epoch >= 10:
+        plt.savefig("out/sample_{}_{}.png".format(correct_labels[0],epoch-10))
+
+    plt.draw()
     plt.pause(1)
 
 def train_printer(epoch,iter_counter,accuracy_spike,accuracy_mem,train_loss = None, test_loss = None):

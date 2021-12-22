@@ -3,6 +3,7 @@ from snntorch import spikegen
 
 #PyTorch
 import torch
+import random
 import time
 import math
 from config import *
@@ -26,7 +27,7 @@ def calc_acc(net,args,device,test_loader,output = False):
         targets = targets.to(device)
 
         #forward pass
-        test_spk, test_mem, _, _ = net(spiking_data[:,:,0,:,:].view(args.num_steps,args.batch_size,NUM_INPUTS),args)
+        test_spk, test_mem, _, _ = net(spiking_data[:,:,0,:,:].view(args.num_steps,args.batch_size,NUM_INPUTS),args, prediction = targets)
         test_spk = test_spk[len(test_spk)-1]
         #calculate total accuracy
         _, predicted_spike = test_spk.sum(dim=0).max(1)
@@ -62,10 +63,16 @@ def calc_acc(net,args,device,test_loader,output = False):
         correct_mem += (predicted_mem == targets).sum().item()
 
     if(output):
-        print("AVG Layer 1")
-        print(net.fc1.weight.mean())
-        print("AVG Layer 2")
-        print(net.fc2.weight.mean())
+        print("--Layer 1--")
+        print("Min: {:.4}".format(net.fc1.weight.min().item()))
+        print("Max: {:.4}".format(net.fc1.weight.max().item()))
+        print("Average: {:.4}".format(net.fc1.weight.mean().item()))
+        print("STD: {:.4}".format(net.fc1.weight.std().item()))
+        print("--Layer 2--")
+        print("Min: {:.4}".format(net.fc2.weight.min().item()))
+        print("Max: {:.4}".format(net.fc2.weight.max().item()))
+        print("Average: {:.4}".format(net.fc2.weight.mean().item()))
+        print("STD: {:.4}".format(net.fc2.weight.std().item()))
         track_correct_labels(targets)
         print_epoch(correct_spike,total,translation_table)
 
@@ -82,7 +89,7 @@ def train_backprop(net, args, device, train_loader, test_loader, optimizer, loss
 
         #forward pass
         net.train()
-        spk_rec, mem_rec, _, _= net(spiking_data.view(args.num_steps,args.batch_size, -1),args)
+        spk_rec, mem_rec, _, _= net(spiking_data.view(args.num_steps,args.batch_size, -1),args, prediction = targets)
         spk_rec = spk_rec[len(spk_rec)-1]
 
         #initialize the loss & sum over time
@@ -106,7 +113,7 @@ def train_backprop(net, args, device, train_loader, test_loader, optimizer, loss
             test_targets = test_targets.to(device)
 
             #Test set forward pass
-            test_spk, test_mem, _, _ = net(spiking_test_data.view(args.num_steps,args.batch_size, -1),args)
+            test_spk, test_mem, _, _ = net(spiking_test_data.view(args.num_steps,args.batch_size, -1),args, prediction = targets)
             test_spk = test_spk[len(test_spk)-1]
 
             #Test set loss
@@ -117,12 +124,12 @@ def train_backprop(net, args, device, train_loader, test_loader, optimizer, loss
             #Print train/test loss/accuracy
             if batch_idx  % args.log_interval == 0:
                 accuracy_spike, accuracy_mem = calc_acc(net,args,device,test_loader)
-                train_printer(epoch,batch_idx,accuracy_spike,accuracy_mem,train_loss = train_loss_hist(len(train_loader)*epoch + batch_idx), test_loss = test_loss_hist(len(train_loader)*epoch + batch_idx))
+                train_printer(epoch,batch_idx,accuracy_spike,accuracy_mem)#,train_loss = train_loss_hist(len(train_loader)*epoch + batch_idx), test_loss = test_loss_hist(len(train_loader)*epoch + batch_idx))
                 track_accuracy(accuracy_spike,accuracy_mem)
                 if args.dry_run:
                     break
 
-def train_stdp(net, args, device, train_loader, test_loader, optimizer, loss, epoch, out = True, layer = 0):
+def train_stdp(net, args, device, train_loader, epoch, out = True, layer = 0):
     train_batch = iter(train_loader)
 
     #Minibatch training loop
@@ -131,7 +138,9 @@ def train_stdp(net, args, device, train_loader, test_loader, optimizer, loss, ep
         spiking_data = spikegen.rate(data.to(device), num_steps=args.num_steps)
 
         #Pass Batch through SNN
-        spk_rec, mem_rec, pre_rec, post_rec = net(spiking_data.view(args.num_steps,args.batch_size, -1),args,stdp = True, layer = layer)
+        spk_rec, mem_rec, pre_rec, post_rec = net(spiking_data.view(args.num_steps,args.batch_size, -1),args,stdp = True, layer = layer,prediction = targets)
+        #print(targets[0])
+        #print(spk_rec[len(spk_rec) - 1].sum(dim=0)[0])
         #spike_indices = []
         #for layer in spk_rec:
         #    indices = layer.nonzero()
@@ -206,12 +215,38 @@ def calc_postsynaptic_spikes(layer,time_step,batch_index,stdp_range):
         return layer[time_step][batch_index]
     return np.add(layer[time_step][batch_index],calc_postsynaptic_spikes(layer,time_step+1,batch_index,stdp_range-1))
 
-def calc_pre_weight_change(args, spk, pre, weights):
-    adjustments = (torch.bmm(pre.unsqueeze(2), spk.unsqueeze(1)).sum(dim=0)) / args.batch_size
+def calc_pre_weight_change(args, spk, pre, weights, negate = False):
+    adjustments = torch.einsum("bi,bj->ij", pre, spk)
     adjusted_weights = (weights + (weights * adjustments)).clamp(MIN_WEIGHT,MAX_WEIGHT)
     return adjusted_weights
 
-def calc_post_weight_change(args, spk, post, weights):
-    adjustments = (torch.bmm(spk.unsqueeze(2), post.unsqueeze(1)).sum(dim=0)) / args.batch_size
+def calc_post_weight_change(args, spk, post, weights, negate = False):
+    adjustments = torch.einsum("bi,bj->ij", spk, post)
     adjusted_weights = (weights + (weights * adjustments)).clamp(MIN_WEIGHT,MAX_WEIGHT)
+    return adjusted_weights
+
+def calc_weight_change_last_layer(args, spk_out, spk_hidden, spk_out_rec, spk_hidden_rec, weights, predicted_spikes):
+    #torch.set_printoptions(profile="full")
+    adjustments_pos = torch.bmm(spk_out.unsqueeze(2), spk_hidden_rec.unsqueeze(1)) #128,10,256
+    adjustments_neg = torch.bmm(spk_out_rec.unsqueeze(2), 1-spk_hidden.unsqueeze(1)) / 9 #128,10,256
+    adjustments = torch.zeros_like(adjustments_pos)
+    adjustments[torch.arange(adjustments.size(0)), predicted_spikes] = adjustments_pos[torch.arange(adjustments.size(0)), predicted_spikes] + adjustments_neg[torch.arange(adjustments.size(0)), predicted_spikes]#128,256
+    adjustments = adjustments.sum(dim=0) / args.batch_size
+    adjusted_weights = (weights + (weights * adjustments)).clamp(MIN_WEIGHT,MAX_WEIGHT)
+    #print(adjustments[0][predicted_spikes[0]][0])
+    #print(adjustments[0][predicted_spikes[0]][5])
+    #print(adjustments[1][predicted_spikes[1]][0])
+    #print(adjustments[1][predicted_spikes[1]][5])
+    #print("---")
+    #print(adjustments[0][predicted_spikes[0]+1][0])
+    #print(adjustments[0][predicted_spikes[0]+1][5])
+    #print(adjustments[1][predicted_spikes[1]+1][0])
+    #print(adjustments[1][predicted_spikes[1]+1][5])
+
+
+    #print("Adjustments")
+    #print(adjustments.size())
+    #print("predicted spikes")
+    #print(predicted_spikes.size()) # 128
+    #adjusted_weights = (weights + (weights * adjustments)).clamp(MIN_WEIGHT,MAX_WEIGHT)
     return adjusted_weights

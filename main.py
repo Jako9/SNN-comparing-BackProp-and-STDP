@@ -38,18 +38,22 @@ def main():
     optimizer = torch.optim.Adam(net.parameters(), lr=args.lr, betas=(0.9, 0.999))
     loss = nn.CrossEntropyLoss()
 
+    setup_plot()
+
     #Outer training loop
     for epoch in range(args.epochs):
         if(args.use_stdp):
-            if(epoch < 25):
-                train_stdp(net,args,device,train_loader,test_loader,optimizer,loss,epoch,layer = 0)
+            if(epoch < 7):
+                train_stdp(net,args,device,train_loader,epoch,layer = 0)
             else:
-                train_stdp(net,args,device,train_loader,test_loader,optimizer,loss,epoch,layer = 1)
+                #train_stdp(net,args,device,train_loader,epoch,layer = 1)
+                train_backprop(net,args,device,train_loader,test_loader,optimizer,loss,epoch)
         else:
             train_backprop(net,args,device,train_loader,test_loader,optimizer,loss,epoch)
         current , _ = calc_acc(net,args,device,test_loader,output=True)
         track_best(current)
-        plotProgress(args,current,LEARN_THRESHOLD)
+        plotProgress(args,current,LEARN_THRESHOLD,epoch)
+
 
     if args.save_model:
         torch.save(net.state_dict(), "fashion_mnist_snn.pt")
