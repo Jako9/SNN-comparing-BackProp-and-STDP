@@ -4,6 +4,9 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 
+import os
+import math
+
 from config import *
 from log import *
 from train import *
@@ -41,22 +44,43 @@ def main():
     setup_plot()
 
     #Outer training loop
-    for epoch in range(args.epochs):
+    train_hidden_layer = not os.path.isfile("model/saved_layer_hidden.net") or args.train_layer <= 0
+    train_output_layer = not os.path.isfile("model/saved_layer_output.net")  or args.train_layer <= 1
+    epoch = 0
+    while epoch < args.epochs:
         if(args.use_stdp):
-            if(epoch < 7):
-                train_stdp(net,args,device,train_loader,epoch,layer = 0)
-            else:
-                #train_stdp(net,args,device,train_loader,epoch,layer = 1)
-                train_backprop(net,args,device,train_loader,test_loader,optimizer,loss,epoch)
+            if(epoch < math.ceil(args.epochs * EPOCHS_FIRST_LAYER_POTION)):#train hidden layer
+                if train_hidden_layer:
+                    train_stdp(net,args,device,train_loader,epoch,layer = 0)
+                    if epoch == math.ceil(args.epochs * EPOCHS_FIRST_LAYER_POTION) - 1 and not arg.ghost:
+                        print("-------SAVING FIRST LAYER-------")
+                        torch.save(net.state_dict(), "model/saved_layer_hidden.net")
+                else:
+                    print("-------LOADING PRE-TRAINED FIRST LAYER-------")
+                    epoch = math.ceil(args.epochs * EPOCHS_FIRST_LAYER_POTION)
+                    net = snn_net.Net(args,device).to(device)
+                    net.load_state_dict(torch.load("model/saved_layer_hidden.net"))
+                    continue
+
+            else:#train output layer
+                if train_output_layer:
+                    #train_stdp(net,args,device,train_loader,epoch,layer = 1)
+                    train_backprop(net,args,device,train_loader,test_loader,optimizer,loss,epoch)
+                    if epoch == args.epochs - 1 and not arg.ghost:
+                        print("-------SAVING SECOND LAYER-------")
+                        torch.save(net.state_dict(), "model/saved_layer_output.net")
+                else:
+                    print("-------LOADING PRE-TRAINED SECOND LAYER-------")
+                    epoch = args.epochs
+                    net = snn_net.Net(args,device).to(device)
+                    net.load_state_dict(torch.load("model/saved_layer_output.net"))
+                    continue
         else:
             train_backprop(net,args,device,train_loader,test_loader,optimizer,loss,epoch)
         current , _ = calc_acc(net,args,device,test_loader,output=True)
         track_best(current)
         plotProgress(args,current,LEARN_THRESHOLD,epoch)
-
-
-    if args.save_model:
-        torch.save(net.state_dict(), "fashion_mnist_snn.pt")
+        epoch += 1
 
 
 if __name__ == '__main__':

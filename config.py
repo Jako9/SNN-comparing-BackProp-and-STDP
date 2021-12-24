@@ -6,25 +6,23 @@ NUM_INPUTS = 28*28
 NUM_HIDDEN = 256
 NUM_OUTPUTS = 10
 
-BATCH_SIZE = 128
 EPOCHS = 100
+EPOCHS_FIRST_LAYER_POTION = 1/20
+
+BATCH_SIZE = 128
 BETA = 0.95
 LR = 5e-4
 LEARN_BETA = False
 LEARN_THRESHOLD = False
 # Temporal Dynamics
-NUM_STEPS = 100
+NUM_STEPS = 50
 dtype = torch.float
 
 #STDP
-STDP_RANGE = 20
-STDP_LR = 5e-4
-STDP_OFFSET = 1
 MIN_WEIGHT = 0
-MAX_WEIGHT = 0.1
-
-A_PLUS = 0.008
-A_MINUS = A_PLUS * 1.01
+MAX_WEIGHT = 1
+A_PLUS = 0.1
+A_MINUS = A_PLUS * 1.04
 STDP_DECAY = 10
 DT = 1
 
@@ -37,7 +35,7 @@ def parse():
     parser = argparse.ArgumentParser(description='PyTorch MNIST Example')
     parser.add_argument('--batch-size', type=int, default=BATCH_SIZE, metavar='N',
                         help='input batch size for training (default: {})'.format(BATCH_SIZE))
-    parser.add_argument('--epochs', type=int, default=EPOCHS, metavar='B',
+    parser.add_argument('--epochs', type=int, default=EPOCHS, metavar='N',
                         help='number of epochs to train (default: {})'.format(EPOCHS))
     parser.add_argument('--beta', type=float, default=BETA, metavar='N',
                         help='default decay rate for Leaky neurons (default: {})'.format(BETA))
@@ -49,14 +47,14 @@ def parse():
                         help='train snn using STDP. If not set, snn is trained using Backpropagation')
     parser.add_argument('--no-cuda', action='store_true', default=False,
                         help='disables CUDA training')
-    parser.add_argument('--dry-run', action='store_true', default=False,
-                        help='quickly check a single pass')
     parser.add_argument('--seed', type=int, default=1, metavar='S',
                         help='random seed (default: 1)')
     parser.add_argument('--log-interval', type=int, default=50, metavar='N',
                         help='how many batches to wait before logging training status')
-    parser.add_argument('--save-model', action='store_true', default=False,
-                        help='For Saving the current Model')
-    parser.add_argument('--load', action='store_true', default=False,
+    parser.add_argument('--ghost', action='store_true', default=False,
+                        help='Training the nn without saving the progress')
+    parser.add_argument('--train-layer', type=int, default=3, metavar='N',
+                        help='Retraining the trained nn starting at specified layer. If not set, no layer is being retrained')
+    parser.add_argument('--demo', action='store_true', default=False,
                         help='demonstrate the nn using a pre-trained version')
     return parser.parse_args()

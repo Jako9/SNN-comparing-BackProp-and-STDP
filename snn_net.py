@@ -1,3 +1,5 @@
+from collections import OrderedDict
+
 #SNN
 import snntorch as snn
 import numpy as np
@@ -81,15 +83,15 @@ class Net(nn.Module):
 
         if args.use_stdp:
             self.fc1.weight.requires_grad = False
-            self.fc2.weight.requires_grad = False
+            #self.fc2.weight.requires_grad = False
             #one = torch.zeros_like(self.fc1.weight)
             #for i in range(one.size(0)):
             #    for j in range(one.size(1)):
             #        if i == j:
             #            one[i][j] = 1
             #self.fc1.weight = torch.nn.parameter.Parameter(one, requires_grad = False)
-            self.fc1.weight = torch.nn.parameter.Parameter(F.dropout(torch.ones_like(self.fc1.weight) * MAX_WEIGHT, p=0.1), requires_grad = False)
-            self.fc2.weight = torch.nn.parameter.Parameter(F.dropout(torch.ones_like(self.fc2.weight) * MAX_WEIGHT, p=0.1))
+            self.fc1.weight = torch.nn.parameter.Parameter(F.dropout(torch.ones_like(self.fc1.weight) * MAX_WEIGHT, p=0.3) * (1-0.3), requires_grad = False)
+            #self.fc2.weight = torch.nn.parameter.Parameter(F.dropout(torch.ones_like(self.fc2.weight) * MAX_WEIGHT, p=0.3))
 
     def forward(self, x, args, stdp = False, layer = 0, prediction = None):
         #Initialize hidden states at t=0
@@ -118,13 +120,17 @@ class Net(nn.Module):
         pre_out = []
         post_out = []
 
-
-        params = STDPParameters(w_max = 0.01, eta_minus = 1e-3 * 2)
+        first = True
         for step in range(NUM_STEPS):
+            old_post0, oldpost1 = post0, post1
             with torch.no_grad():
                 spk0, mem0, pre0, post0 = self.lif0(x[step],mem0, pre0, post0)
                 cur1 = F.relu(self.fc1(spk0))
                 spk1, mem1, pre1, post1 = self.lif1(cur1, mem1, pre1, post1)
+                if first:
+                    first = False
+                    oldpost0 = torch.zeros_like(post0)
+                    oldpost1 = torch.zeros_like(post1)
             cur2 = F.relu(self.fc2(spk1))
             spk2, mem2, pre2, post2 = self.lif2(cur2, mem2, pre2, post2)
 
@@ -143,35 +149,16 @@ class Net(nn.Module):
             pre2_rec.append(pre2)
             post2_rec.append(post2)
 
+
+            #Update via stdp-rule
             if stdp:
                 if(layer == 0):
-                    state = STDPState(pre0,post1)
-                    #dw1 , state = stdp_step_linear(spk0,spk1,self.fc1.weight,state,params)
-                    dw1 = calc_pre_weight_change(args,spk0,post1,self.fc1.weight)
+                    dw1 = calc_pre_weight_change(args,spk0,oldpost1,self.fc1.weight)
                     dw1 = calc_post_weight_change(args,spk1,pre0,dw1)
                     self.fc1.weight = torch.nn.parameter.Parameter(dw1)
                 if(layer == 1):
-                    #if random.randrange(0, 2000) < 2:
-                    #    print("Analyzing")
-                    #    print("1 Layer Spikes")
-                    #    print(spk1)
-                    #    print("2 Layer Spikes")
-                    #    print(spk2)
-                    #    print("Weights")
-                    #    print(self.fc2.weight)
-                    #    dw2 = calc_pre_weight_change(args,spk1,post2,self.fc2.weight) / 2
-                    #    dw2 = calc_post_weight_change(args,spk2,pre1,dw2) / 2
-                    #    print("Updated weights")
-                    #    print(dw2)
-                    #_, predicted_spikes = torch.stack(spk2_rec,dim=0).sum(dim=0).max(1)
                     _, network_prediction = torch.stack(spk2_rec,dim=0).sum(dim=0).max(1)
-                    for i in range (network_prediction.size(0)):
-                        if network_prediction[i] == prediction[i]:
-                            dw2 = calc_pre_weight_change(args,spk1,post2,self.fc2.weight)
-                            dw2 = calc_post_weight_change(args,spk2,pre1,dw2)
-                        else:
-                            dw2 = punish(self.fc2.weight,prediction)
-                    #dw2 = calc_weight_change_last_layer(args,spk2,spk1,post2,pre1,self.fc2.weight,prediction)
+                    dw2 = calc_weight_change_last_layer(args,spk2,spk1,post2,pre1,self.fc2.weight,prediction)
                     self.fc2.weight = torch.nn.parameter.Parameter(dw2)
 
         spk_out.append(torch.stack(spk0_rec,dim=0))
@@ -186,9 +173,3 @@ class Net(nn.Module):
         post_out.append(torch.stack(post1_rec,dim=0))
         post_out.append(torch.stack(post2_rec,dim=0))
         return spk_out, torch.stack(mem2_rec, dim=0), pre_out, post_out
-
-def reward(weights, prediction):
-    return weights
-
-def punish(weights, prediction):
-    return weights

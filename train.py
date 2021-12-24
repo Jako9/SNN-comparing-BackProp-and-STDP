@@ -20,6 +20,8 @@ def calc_acc(net,args,device,test_loader,output = False):
     total = 0
     correct_spike = 0
     correct_mem = 0
+    zero_activity = 0
+    total_activity = 0
     with torch.no_grad():
       net.eval()
       for data, targets in test_loader:
@@ -27,8 +29,9 @@ def calc_acc(net,args,device,test_loader,output = False):
         targets = targets.to(device)
 
         #forward pass
-        test_spk, test_mem, _, _ = net(spiking_data[:,:,0,:,:].view(args.num_steps,args.batch_size,NUM_INPUTS),args, prediction = targets)
-        test_spk = test_spk[len(test_spk)-1]
+        test_spk_all, test_mem, _, _ = net(spiking_data[:,:,0,:,:].view(args.num_steps,args.batch_size,NUM_INPUTS),args, prediction = targets)
+        test_spk = test_spk_all[len(test_spk_all)-1]
+        test_spk_hidden = test_spk_all[len(test_spk_all)-2].swapaxes(0,1)
         #calculate total accuracy
         _, predicted_spike = test_spk.sum(dim=0).max(1)
         _, predicted_mem = test_mem.sum(dim=0).max(1)
@@ -61,8 +64,11 @@ def calc_acc(net,args,device,test_loader,output = False):
         total += targets.size(0)
         correct_spike += (predicted_spike == targets).sum().item()
         correct_mem += (predicted_mem == targets).sum().item()
+        zero_activity += (test_spk_hidden.sum(1).sum(1)==torch.zeros(args.batch_size,device=device)).sum().item()
+        total_activity += test_spk_hidden.sum().item()
 
     if(output):
+        print("\n")
         print("--Layer 1--")
         print("Min: {:.4}".format(net.fc1.weight.min().item()))
         print("Max: {:.4}".format(net.fc1.weight.max().item()))
@@ -72,7 +78,12 @@ def calc_acc(net,args,device,test_loader,output = False):
         print("Min: {:.4}".format(net.fc2.weight.min().item()))
         print("Max: {:.4}".format(net.fc2.weight.max().item()))
         print("Average: {:.4}".format(net.fc2.weight.mean().item()))
+        print("\n")
         print("STD: {:.4}".format(net.fc2.weight.std().item()))
+        print("\n")
+        print("Zero-Activity percentage: {:.2f}%".format((zero_activity/total)*100))
+        print("Average-Activity: {:.2f}".format(total_activity/(total*args.num_steps)))
+        print("\n")
         track_correct_labels(targets)
         print_epoch(correct_spike,total,translation_table)
 
@@ -126,8 +137,6 @@ def train_backprop(net, args, device, train_loader, test_loader, optimizer, loss
                 accuracy_spike, accuracy_mem = calc_acc(net,args,device,test_loader)
                 train_printer(epoch,batch_idx,accuracy_spike,accuracy_mem)#,train_loss = train_loss_hist(len(train_loader)*epoch + batch_idx), test_loss = test_loss_hist(len(train_loader)*epoch + batch_idx))
                 track_accuracy(accuracy_spike,accuracy_mem)
-                if args.dry_run:
-                    break
 
 def train_stdp(net, args, device, train_loader, epoch, out = True, layer = 0):
     train_batch = iter(train_loader)
@@ -139,114 +148,30 @@ def train_stdp(net, args, device, train_loader, epoch, out = True, layer = 0):
 
         #Pass Batch through SNN
         spk_rec, mem_rec, pre_rec, post_rec = net(spiking_data.view(args.num_steps,args.batch_size, -1),args,stdp = True, layer = layer,prediction = targets)
-        #print(targets[0])
-        #print(spk_rec[len(spk_rec) - 1].sum(dim=0)[0])
-        #spike_indices = []
-        #for layer in spk_rec:
-        #    indices = layer.nonzero()
-        #    spike_indices.append(indices)
-
-        #layers_weights = []
-        #for layer in net.children():
-        #    if isinstance(layer, torch.nn.Linear):
-        #        layers_weights.append(layer.weight.to("cpu").detach().numpy())
-        #
-        #for layer_index in range(1,len(spk_rec)):
-        #    adjustments = calc_spikes(layers_weights[layer_index-1],layers_weights,spk_rec[layer_index].to("cpu").detach().numpy(),spk_rec[layer_index-1].to("cpu").detach().numpy(),args.num_steps,args.batch_size,STDP_RANGE)
-        #    with torch.no_grad():
-        #        linear_layer_index = 0
-        #        for layer in net.children():
-        #            if isinstance(layer, torch.nn.Linear):
-        #                if (linear_layer_index + 1 == layer_index):
-        #                    weights = layer.weight.to("cpu").detach().numpy()
-        #                    updated_weights = torch.nn.parameter.Parameter(torch.tensor(np.add(weights,adjustments,dtype=np.float32)).to(device))
-        #                    layer.weight = updated_weights
-        #                    break
-        #                linear_layer_index += 1
-
         if out:
             printProgressBar(batch_idx, len(train_batch), "Spk: {:.2f}%, Mem: {:.2f}%".format(accuracy_spike,accuracy_mem), "Complete", length=50)
 
         if batch_idx  % args.log_interval == 0:
             #accuracy_spike, accuracy_mem = calc_acc(net,args,device,test_loader)
             track_accuracy(0,0)
-            if args.dry_run:
-                break
     print()
     print("Epoch {} Done!".format(epoch))
 
-@njit()
-def calc_spikes(weights,layers_weights,layer,prev_layer,num_steps,batch_size,stdp_range):
-    adjustments = np.zeros(weights.shape)
-    for time_step in range(num_steps):
-        for batch_index in range(batch_size):
-            if 1 in layer[time_step][batch_index]:
-                presynaptic_spikes = calc_presynaptic_spikes(prev_layer,time_step,batch_index,stdp_range-1)
-                postsynaptic_spikes = calc_postsynaptic_spikes(prev_layer,time_step+1,batch_index,stdp_range-1)
-                for post_neuron_index in range(layer[time_step][batch_index].size):
-                    if(layer[time_step][batch_index][post_neuron_index] == 1):
-                        for pre_neuron_index in range(prev_layer[time_step][batch_index].size):
-                            adjustments[post_neuron_index][pre_neuron_index] += (calc_weight_adjustment(weights,post_neuron_index,pre_neuron_index,presynaptic_spikes[pre_neuron_index],postsynaptic_spikes[pre_neuron_index])/ batch_size * num_steps)
-
-    return adjustments
-
-@njit()
-def calc_weight_adjustment(weights,post_neuron,pre_neuron,pre_count,post_count):
-    adjustedment = STDP_LR * (math.exp((pre_count - post_count) / STDP_RANGE) - STDP_OFFSET) * (MAX_WEIGHT - weights[post_neuron][pre_neuron]) * (weights[post_neuron][pre_neuron] - MIN_WEIGHT)
-    #print("Pre, Post: {}, {}".format(pre_count,post_count))
-    #print("Exp: {}".format((math.exp((pre_count - post_count) / STDP_RANGE) - STDP_OFFSET)))
-    #print("Weight: {}".format(weights[post_neuron][pre_neuron]))
-    #print("Adjustment: {}".format(adjustedments))
-    return adjustedment
-
-@njit()
-def calc_presynaptic_spikes(layer,time_step,batch_index,stdp_range):
-    if time_step < 0:
-        return np.zeros(layer[0][0].size).astype(np.float32)
-    if stdp_range <= 0:
-        return layer[time_step][batch_index]
-    return np.add(layer[time_step][batch_index],calc_presynaptic_spikes(layer,time_step-1,batch_index,stdp_range-1))
-
-@njit()
-def calc_postsynaptic_spikes(layer,time_step,batch_index,stdp_range):
-    if time_step >= layer.shape[0]:
-        return np.zeros(layer[0][0].size).astype(np.float32)
-    if stdp_range <= 0:
-        return layer[time_step][batch_index]
-    return np.add(layer[time_step][batch_index],calc_postsynaptic_spikes(layer,time_step+1,batch_index,stdp_range-1))
-
-def calc_pre_weight_change(args, spk, pre, weights, negate = False):
-    adjustments = torch.einsum("bi,bj->ij", pre, spk)
+def calc_pre_weight_change(args, spk, pre, weights):
+    adjustments = torch.einsum("bi,bj->ij", pre, spk) / args.batch_size
     adjusted_weights = (weights + (weights * adjustments)).clamp(MIN_WEIGHT,MAX_WEIGHT)
     return adjusted_weights
 
-def calc_post_weight_change(args, spk, post, weights, negate = False):
-    adjustments = torch.einsum("bi,bj->ij", spk, post)
+def calc_post_weight_change(args, spk, post, weights):
+    adjustments = torch.einsum("bi,bj->ij", spk, post) / args.batch_size
     adjusted_weights = (weights + (weights * adjustments)).clamp(MIN_WEIGHT,MAX_WEIGHT)
     return adjusted_weights
 
 def calc_weight_change_last_layer(args, spk_out, spk_hidden, spk_out_rec, spk_hidden_rec, weights, predicted_spikes):
-    #torch.set_printoptions(profile="full")
     adjustments_pos = torch.bmm(spk_out.unsqueeze(2), spk_hidden_rec.unsqueeze(1)) #128,10,256
     adjustments_neg = torch.bmm(spk_out_rec.unsqueeze(2), 1-spk_hidden.unsqueeze(1)) / 9 #128,10,256
     adjustments = torch.zeros_like(adjustments_pos)
     adjustments[torch.arange(adjustments.size(0)), predicted_spikes] = adjustments_pos[torch.arange(adjustments.size(0)), predicted_spikes] + adjustments_neg[torch.arange(adjustments.size(0)), predicted_spikes]#128,256
     adjustments = adjustments.sum(dim=0) / args.batch_size
     adjusted_weights = (weights + (weights * adjustments)).clamp(MIN_WEIGHT,MAX_WEIGHT)
-    #print(adjustments[0][predicted_spikes[0]][0])
-    #print(adjustments[0][predicted_spikes[0]][5])
-    #print(adjustments[1][predicted_spikes[1]][0])
-    #print(adjustments[1][predicted_spikes[1]][5])
-    #print("---")
-    #print(adjustments[0][predicted_spikes[0]+1][0])
-    #print(adjustments[0][predicted_spikes[0]+1][5])
-    #print(adjustments[1][predicted_spikes[1]+1][0])
-    #print(adjustments[1][predicted_spikes[1]+1][5])
-
-
-    #print("Adjustments")
-    #print(adjustments.size())
-    #print("predicted spikes")
-    #print(predicted_spikes.size()) # 128
-    #adjusted_weights = (weights + (weights * adjustments)).clamp(MIN_WEIGHT,MAX_WEIGHT)
     return adjusted_weights

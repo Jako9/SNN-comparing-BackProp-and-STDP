@@ -206,12 +206,14 @@ def print_epoch(correct_spike,total,translation_table):
     avg_certainty = translation_table[1].sum().item() / translation_table[1].size(0)
     print(f"Total correctly classified test set images: {correct_spike}/{total}")
     print(f"Test Set Accuracy: {100 * correct_spike / total:.2f}%")
+    print("\n")
     print("Classes:")
     print("0|1|2|3|4|5|6|7|8|9")
     print("↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓")
     t = translation_table[0]
     print("{}|{}|{}|{}|{}|{}|{}|{}|{}|{}".format(t[0],t[1],t[2],t[3],t[4],t[5],t[6],t[7],t[8],t[9]))
     print("Average certainty: {}".format(avg_certainty))
+    print("\n")
     global class_guesses
     for i, correct in enumerate(class_guesses):
         print("{}: {}".format(i,correct))
