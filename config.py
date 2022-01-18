@@ -7,31 +7,32 @@ NUM_HIDDEN = 1000
 NUM_OUTPUTS = 1000
 
 EPOCHS = 100
+dtype = torch.float
 
-BATCH_SIZE = 128
+#Learning parameters
+BATCH_SIZE = 256
 BETA = 0.95
 LR = 5e-4
 LEARN_BETA = False
 LEARN_THRESHOLD = False
+
 # Temporal Dynamics
 NUM_STEPS = 50
-dtype = torch.float
 
 #STDP
-MIN_WEIGHT = 0
 MAX_WEIGHT = 0.6
-A_PLUS = 0.00027#0.027
+A_PLUS = 2.7e-4
 A_MINUS = A_PLUS * 1.025
 STDP_DECAY = 10
 DT = 1
 
+DATA_PATH='/data/mnist'
+
 #Corresponding Items to nn Classes
 classes = ["T-Shirt","Trouser","Pullover","Dress","Coat","Sandal","Shirt","Sneaker","Bag","Ankle Boot"]
 
-DATA_PATH='/data/mnist'
-
 def parse():
-    parser = argparse.ArgumentParser(description='PyTorch MNIST Example')
+    parser = argparse.ArgumentParser(description='PyTorch SNN MNIST STDP/Backpropagation')
     parser.add_argument('--batch-size', type=int, default=BATCH_SIZE, metavar='N',
                         help='input batch size for training (default: {})'.format(BATCH_SIZE))
     parser.add_argument('--epochs', type=int, default=EPOCHS, metavar='N',
@@ -54,6 +55,4 @@ def parse():
                         help='Training the nn without saving the progress')
     parser.add_argument('--train-layer', type=int, default=3, metavar='N',
                         help='Retraining the trained nn starting at specified layer. If not set, no layer is being retrained')
-    parser.add_argument('--demo', action='store_true', default=False,
-                        help='demonstrate the nn using a pre-trained version')
     return parser.parse_args()

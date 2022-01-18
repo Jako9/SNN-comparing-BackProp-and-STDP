@@ -24,19 +24,6 @@ train_loss_hist_ = []
 test_loss_hist_ = []
 accuracies_spike = []
 accuracies_mem = []
-class_guesses = [
-                np.array([0,0,0,0,0,0,0,0,0,0]),
-                np.array([0,0,0,0,0,0,0,0,0,0]),
-                np.array([0,0,0,0,0,0,0,0,0,0]),
-                np.array([0,0,0,0,0,0,0,0,0,0]),
-                np.array([0,0,0,0,0,0,0,0,0,0]),
-                np.array([0,0,0,0,0,0,0,0,0,0]),
-                np.array([0,0,0,0,0,0,0,0,0,0]),
-                np.array([0,0,0,0,0,0,0,0,0,0]),
-                np.array([0,0,0,0,0,0,0,0,0,0]),
-                np.array([0,0,0,0,0,0,0,0,0,0])
-                ]
-correct_labels = torch.zeros(1)
 bestAcc = 0
 
 
@@ -232,27 +219,35 @@ def printProgressBar(iteration, total, prefix='', suffix='', decimals=1, length=
     if iteration == total:
         print()
 
-def print_epoch(correct_spike,total,translation_table):
-    avg_certainty = translation_table[1].sum().item() / translation_table[1].size(0)
+def output_layer_stats(net,zero_activity,full_activity,total_activity):
+    print("\n")
+    print("--Layer 1--")
+    print("Min: {:.4}".format(net.fc1.weight.min().item()))
+    print("Max: {:.4}".format(net.fc1.weight.max().item()))
+    print("Average: {:.4}".format(net.fc1.weight.mean().item()))
+    print("STD: {:.4}".format(net.fc1.weight.std().item()))
+    print(" ")
+    print("Zero-Activity: {:.2f}%".format(zero_activity[0]))
+    print("Full-Activity: {:.2f}%".format(full_activity[0]))
+    print("Average-Activity: {:.2f}%".format(total_activity[0]))
+    print("\n")
+    print("--Layer 2--")
+    print("Min: {:.4}".format(net.fc2.weight.min().item()))
+    print("Max: {:.4}".format(net.fc2.weight.max().item()))
+    print("Average: {:.4}".format(net.fc2.weight.mean().item()))
+    print("STD: {:.4}".format(net.fc2.weight.std().item()))
+    print(" ")
+    print("Zero-Activity: {:.2f}%".format(zero_activity[1]))
+    print("Full-Activity: {:.2f}%".format(full_activity[1]))
+    print("Average-Activity: {:.2f}%".format(total_activity[1]))
+    print("\n")
+
+def print_epoch(correct_spike,total):
     print(f"Total correctly classified test set images: {correct_spike}/{total}")
     print(f"Test Set Accuracy: {100 * correct_spike / total:.2f}%")
-    #print("\n")
-    #print("Classes:")
-    #print("0|1|2|3|4|5|6|7|8|9")
-    #print("↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓")
-    #t = translation_table[0]
-    #print("{}|{}|{}|{}|{}|{}|{}|{}|{}|{}".format(t[0],t[1],t[2],t[3],t[4],t[5],t[6],t[7],t[8],t[9]))
-    #print("Average certainty: {}".format(avg_certainty))
-    #print("\n")
-    #global class_guesses
-    #for classed in class_guesses:
-    #    for guess in classed:
-    #        print("{:04.1f}%".format(guess*100/classed.sum()), end ="|")
-    #    print()
-    #print("\n")
 
 def print_params(net):
-    print("---Learnable parameters---")
+    print("---Parameters tracked by backpropagation---")
     length = 0
     for name, param in net.named_parameters():
         if param.requires_grad:
@@ -263,22 +258,3 @@ def print_params(net):
             length += layer_size
     print("In summary {} parameters".format(length))
     print()
-
-def track_class_guesses(correct,guess):
-    global class_guesses
-    class_guesses[correct][guess] += 1
-
-def reset_class_guesses():
-    global class_guesses
-    class_guesses = [
-                    np.array([0,0,0,0,0,0,0,0,0,0]),
-                    np.array([0,0,0,0,0,0,0,0,0,0]),
-                    np.array([0,0,0,0,0,0,0,0,0,0]),
-                    np.array([0,0,0,0,0,0,0,0,0,0]),
-                    np.array([0,0,0,0,0,0,0,0,0,0]),
-                    np.array([0,0,0,0,0,0,0,0,0,0]),
-                    np.array([0,0,0,0,0,0,0,0,0,0]),
-                    np.array([0,0,0,0,0,0,0,0,0,0]),
-                    np.array([0,0,0,0,0,0,0,0,0,0]),
-                    np.array([0,0,0,0,0,0,0,0,0,0])
-                    ]
