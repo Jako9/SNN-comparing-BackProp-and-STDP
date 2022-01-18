@@ -14,6 +14,9 @@ spk2_hist = []
 mem0_hist = []
 mem1_hist = []
 mem2_hist = []
+zero_activity_hist = []
+full_activity_hist = []
+total_activity_hist = []
 thrs0_hist = torch.zeros(NUM_INPUTS)
 thrs1_hist = torch.zeros(NUM_HIDDEN)
 thrs2_hist = torch.zeros(NUM_OUTPUTS)
@@ -21,7 +24,18 @@ train_loss_hist_ = []
 test_loss_hist_ = []
 accuracies_spike = []
 accuracies_mem = []
-class_guesses = [[0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0]]
+class_guesses = [
+                np.array([0,0,0,0,0,0,0,0,0,0]),
+                np.array([0,0,0,0,0,0,0,0,0,0]),
+                np.array([0,0,0,0,0,0,0,0,0,0]),
+                np.array([0,0,0,0,0,0,0,0,0,0]),
+                np.array([0,0,0,0,0,0,0,0,0,0]),
+                np.array([0,0,0,0,0,0,0,0,0,0]),
+                np.array([0,0,0,0,0,0,0,0,0,0]),
+                np.array([0,0,0,0,0,0,0,0,0,0]),
+                np.array([0,0,0,0,0,0,0,0,0,0]),
+                np.array([0,0,0,0,0,0,0,0,0,0])
+                ]
 correct_labels = torch.zeros(1)
 bestAcc = 0
 
@@ -70,6 +84,12 @@ def track_accuracy(accuracy_spike,accuracy_mem):
 def track_correct_labels(targets):
     global correct_labels
     correct_labels = targets
+
+def track_firing_rates(zero_activity,full_activity,total_activity):
+    global zero_activity_hist,total_activity_hist,full_activity_hist
+    zero_activity_hist.append(zero_activity)
+    full_activity_hist.append(full_activity)
+    total_activity_hist.append(total_activity)
 
 def track_best(current):
     global bestAcc
@@ -145,7 +165,7 @@ def plotProgress(args,currentAccuracy,learn_threshold,epoch):
     ax[0][2].plot(x_scaledi,yi_mem, label = "Accuracy Potential")
     ax[0][2].legend(loc='center left', bbox_to_anchor=(1, 0.5),fancybox=True, shadow=True)
     ax[0][2].set_title("Learning Progress Analysis, Current Accuracy: {:.2f}%".format(currentAccuracy))
-    ax[0][2].set_ylabel("Accuracy in %")
+    ax[0][2].set_ylabel("%")
     ax[0][2].set_ylim([0,100])
 
     if not args.use_stdp:
@@ -154,6 +174,16 @@ def plotProgress(args,currentAccuracy,learn_threshold,epoch):
         ax[1][2].plot(test_loss_hist_, label = "Test Loss")
         ax[1][2].legend(loc='center left', bbox_to_anchor=(1, 0.5), fancybox=True, shadow=True)
         ax[1][2].set_ylabel("Loss")
+    else:
+        ax[1][2].clear()
+        useless_data = np.array(full_activity_hist) + np.array(zero_activity_hist)
+        ax[1][2].plot(zero_activity_hist, label = "Zero Activity")
+        ax[1][2].plot(full_activity_hist, label = "Full Activity")
+        ax[1][2].plot(total_activity_hist, label = "Average Activity")
+        ax[1][2].plot(useless_data, label = "Useless Data", color = "red", linewidth = 1, linestyle= "dashed")
+        ax[1][2].legend(loc='center left', bbox_to_anchor=(1, 0.5), fancybox=True, shadow=True)
+        ax[1][2].set_ylabel("%")
+        ax[1][2].set_ylim([0,100])
 
     ax[2][2].clear()
     for i in range(len(mempot_interp)):
@@ -206,18 +236,20 @@ def print_epoch(correct_spike,total,translation_table):
     avg_certainty = translation_table[1].sum().item() / translation_table[1].size(0)
     print(f"Total correctly classified test set images: {correct_spike}/{total}")
     print(f"Test Set Accuracy: {100 * correct_spike / total:.2f}%")
-    print("\n")
-    print("Classes:")
-    print("0|1|2|3|4|5|6|7|8|9")
-    print("↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓")
-    t = translation_table[0]
-    print("{}|{}|{}|{}|{}|{}|{}|{}|{}|{}".format(t[0],t[1],t[2],t[3],t[4],t[5],t[6],t[7],t[8],t[9]))
-    print("Average certainty: {}".format(avg_certainty))
-    print("\n")
-    global class_guesses
-    for i, correct in enumerate(class_guesses):
-        print("{}: {}".format(i,correct))
-    print("\n")
+    #print("\n")
+    #print("Classes:")
+    #print("0|1|2|3|4|5|6|7|8|9")
+    #print("↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓")
+    #t = translation_table[0]
+    #print("{}|{}|{}|{}|{}|{}|{}|{}|{}|{}".format(t[0],t[1],t[2],t[3],t[4],t[5],t[6],t[7],t[8],t[9]))
+    #print("Average certainty: {}".format(avg_certainty))
+    #print("\n")
+    #global class_guesses
+    #for classed in class_guesses:
+    #    for guess in classed:
+    #        print("{:04.1f}%".format(guess*100/classed.sum()), end ="|")
+    #    print()
+    #print("\n")
 
 def print_params(net):
     print("---Learnable parameters---")
@@ -238,4 +270,15 @@ def track_class_guesses(correct,guess):
 
 def reset_class_guesses():
     global class_guesses
-    class_guesses = [[0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0]]
+    class_guesses = [
+                    np.array([0,0,0,0,0,0,0,0,0,0]),
+                    np.array([0,0,0,0,0,0,0,0,0,0]),
+                    np.array([0,0,0,0,0,0,0,0,0,0]),
+                    np.array([0,0,0,0,0,0,0,0,0,0]),
+                    np.array([0,0,0,0,0,0,0,0,0,0]),
+                    np.array([0,0,0,0,0,0,0,0,0,0]),
+                    np.array([0,0,0,0,0,0,0,0,0,0]),
+                    np.array([0,0,0,0,0,0,0,0,0,0]),
+                    np.array([0,0,0,0,0,0,0,0,0,0]),
+                    np.array([0,0,0,0,0,0,0,0,0,0])
+                    ]

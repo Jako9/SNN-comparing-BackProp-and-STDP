@@ -75,7 +75,7 @@ class Net(nn.Module):
             threshold2 = torch.ones(NUM_OUTPUTS).to(device)
 
         #Initialize layers
-        self.lif0 = LeakySTDP(beta=args.beta,learn_beta=LEARN_BETA,threshold = 0, reset_mechanism="zero")
+        self.lif0 = LeakySTDP(beta=args.beta,learn_beta=LEARN_BETA,threshold = 0, reset_mechanism="subtract")
         self.fc1 = nn.Linear(NUM_INPUTS, NUM_HIDDEN,bias = False)
         self.lif1 = LeakySTDP(beta=args.beta,learn_beta=LEARN_BETA,threshold = threshold1, reset_mechanism="zero")
         self.fc2 = nn.Linear(NUM_HIDDEN, NUM_OUTPUTS,bias = False)
@@ -83,15 +83,22 @@ class Net(nn.Module):
 
         if args.use_stdp:
             self.fc1.weight.requires_grad = False
-            #self.fc2.weight.requires_grad = False
+            self.fc2.weight.requires_grad = False
             #one = torch.zeros_like(self.fc1.weight)
             #for i in range(one.size(0)):
             #    for j in range(one.size(1)):
             #        if i == j:
             #            one[i][j] = 1
             #self.fc1.weight = torch.nn.parameter.Parameter(one, requires_grad = False)
-            self.fc1.weight = torch.nn.parameter.Parameter(F.dropout(torch.ones_like(self.fc1.weight) * MAX_WEIGHT, p=0.3) * (1-0.3), requires_grad = False)
-            #self.fc2.weight = torch.nn.parameter.Parameter(F.dropout(torch.ones_like(self.fc2.weight) * MAX_WEIGHT, p=0.3))
+            #self.fc1.weight = torch.nn.parameter.Parameter(torch.rand_like(self.fc1.weight) * MAX_WEIGHT, requires_grad = False)
+            neg_weights_hidden = (F.dropout(torch.ones_like(self.fc1.weight),p=0.75) * -0.25 * 2) + 1
+            neg_weights_out = (F.dropout(torch.ones_like(self.fc2.weight),p=0.75) * -0.25 * 2) + 1
+            self.fc1.weight = torch.nn.parameter.Parameter(F.dropout(torch.rand_like(self.fc1.weight) * MAX_WEIGHT, p=0.6) * (1-0.6) * neg_weights_hidden, requires_grad = False)
+            self.fc2.weight = torch.nn.parameter.Parameter(F.dropout(torch.rand_like(self.fc2.weight) * MAX_WEIGHT, p=0.6) * (1-0.6) * neg_weights_out, requires_grad = False)
+            #weights = torch.zeros_like(self.fc2.weight)
+            #for i in range(weights.size(0)):
+            #    weights[i][i] = 1
+            #self.fc2.weight = torch.nn.parameter.Parameter(weights)
 
     def forward(self, x, args, stdp = False, layer = 0, prediction = None):
         #Initialize hidden states at t=0
@@ -120,19 +127,21 @@ class Net(nn.Module):
         pre_out = []
         post_out = []
 
-        first = True
         for step in range(NUM_STEPS):
-            old_post0, oldpost1 = post0, post1
-            with torch.no_grad():
+            if args.use_stdp:
+                with torch.no_grad():
+                    spk0, mem0, pre0, post0 = self.lif0(x[step],mem0, pre0, post0)
+                    cur1 = self.fc1(spk0)
+                    spk1, mem1, pre1, post1 = self.lif1(cur1, mem1, pre1, post1)
+                    cur2 = F.relu(self.fc2(spk1))
+                    spk2, mem2, pre2, post2 = self.lif2(cur2, mem2, pre2, post2)
+
+            else:
                 spk0, mem0, pre0, post0 = self.lif0(x[step],mem0, pre0, post0)
                 cur1 = F.relu(self.fc1(spk0))
                 spk1, mem1, pre1, post1 = self.lif1(cur1, mem1, pre1, post1)
-                if first:
-                    first = False
-                    oldpost0 = torch.zeros_like(post0)
-                    oldpost1 = torch.zeros_like(post1)
-            cur2 = F.relu(self.fc2(spk1))
-            spk2, mem2, pre2, post2 = self.lif2(cur2, mem2, pre2, post2)
+                cur2 = F.relu(self.fc2(spk1))
+                spk2, mem2, pre2, post2 = self.lif2(cur2, mem2, pre2, post2)
 
             #Track Spike-Activity and Membrane Potential
             write_log(spk0[0],mem1[0],spk1[0],mem2[0],spk2[0])
@@ -153,12 +162,12 @@ class Net(nn.Module):
             #Update via stdp-rule
             if stdp:
                 if(layer == 0):
-                    dw1 = calc_pre_weight_change(args,spk0,oldpost1,self.fc1.weight)
+                    dw1 = calc_pre_weight_change(args,spk0,post1,self.fc1.weight)
                     dw1 = calc_post_weight_change(args,spk1,pre0,dw1)
                     self.fc1.weight = torch.nn.parameter.Parameter(dw1)
                 if(layer == 1):
-                    _, network_prediction = torch.stack(spk2_rec,dim=0).sum(dim=0).max(1)
-                    dw2 = calc_weight_change_last_layer(args,spk2,spk1,post2,pre1,self.fc2.weight,prediction)
+                    dw2 = calc_pre_weight_change(args,spk1,post2,self.fc2.weight)
+                    dw2 = calc_post_weight_change(args,spk2,pre1,dw2)
                     self.fc2.weight = torch.nn.parameter.Parameter(dw2)
 
         spk_out.append(torch.stack(spk0_rec,dim=0))
